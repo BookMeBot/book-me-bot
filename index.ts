@@ -1,8 +1,4 @@
-// const { Telegraf } = require("telegraf");
-// const { ethers } = require("ethers");
-// const dotenv = require("dotenv");
-// const axios = require("axios");
-// const { createClient } = require("redis");
+import { Request, Response } from "express";
 
 import dotenv from "dotenv";
 import { ethers } from "ethers";
@@ -591,12 +587,12 @@ function handleFundingComplete(chatId: any) {
   console.log(`Funding complete message sent to chat ${chatId}`);
 }
 
-// Add health check endpoint
+// Simplified health check endpoint
 const app = express();
 const PORT = process.env.PORT || 3000;
 
-app.get("/", (req, res) => {
-  res.status(200).send("OK");
+app.get("/", (_req: Request, res: Response) => {
+  res.sendStatus(200);
 });
 
 // Wrap initialization in async function
@@ -604,14 +600,18 @@ async function initBot() {
   try {
     await client.connect();
 
-    // Start the bot
-    await bot.launch();
-    console.log("Bot is running");
+    // Start both the bot and express server
+    await Promise.all([
+      bot.launch(),
+      new Promise((resolve) => {
+        app.listen(PORT, () => {
+          console.log(`Server running on port ${PORT}`);
+          resolve(true);
+        });
+      }),
+    ]);
 
-    // Start express server
-    app.listen(PORT, () => {
-      console.log(`Health check server running on port ${PORT}`);
-    });
+    console.log("Bot is running");
   } catch (error) {
     console.error("Failed to initialize:", error);
     process.exit(1);
