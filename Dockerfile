@@ -1,20 +1,21 @@
-# Use Node.js LTS version
 FROM node:18-slim
 
-# Set working directory
 WORKDIR /app
 
-# Copy package files
+# Copy package files first to leverage Docker cache
 COPY package*.json ./
 
-# Install dependencies
+# Install ALL dependencies (including devDependencies)
 RUN npm install
 
-# Copy source code
+# Copy the rest of the application
 COPY . .
 
 # Build the application
 RUN npm run build
+
+# Clean up dev dependencies
+RUN npm prune --production
 
 # Start the application
 CMD ["npm", "start"]
