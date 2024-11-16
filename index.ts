@@ -168,17 +168,19 @@ bot.command("sendhistory", async (ctx: any) => {
   }
 });
 
-const chatWallets: { [chatId: string]: WalletInfo } = {};
+async function createWalletForChat(chatId: string, appId: string) {
+  if (!appId || !NILLION_USER_ID) {
+    throw new Error("App ID is required to create a wallet");
+  }
 
-async function createWalletForChat(chatId: string) {
   const wallet = ethers.Wallet.createRandom();
-  chatWallets[chatId] = {
-    address: wallet.address,
-    privateKey: wallet.privateKey,
-  };
 
   console.log(`Created wallet for chat ${chatId}: ${wallet.address}`);
-  return wallet.address;
+  await storePrivateKey(appId, NILLION_USER_ID, wallet.privateKey);
+
+  return {
+    address: wallet.address,
+  };
 }
 
 // First, let's define an interface for our chat data structure
@@ -205,22 +207,21 @@ bot.start(async (ctx: any) => {
   const userId = ctx.from?.id;
 
   try {
-    const appId = await registerAppId();
-    console.log(appId, "appid");
-
     // Get existing data or initialize new
     const existingDataStr = await client.get(chatId);
     let chatData: ChatData = existingDataStr
       ? JSON.parse(existingDataStr)
       : { chatId };
 
-    // Update with new wallet and Nillion data
-    chatData = {
-      ...chatData,
-      walletAddress: chatWallets[chatId]?.address,
-      nillionId: appId,
-    };
+    const appId = existingDataStr ? chatData.nillionId : await registerAppId();
+    chatData.nillionId = appId;
 
+    const privateKey = await retrievePrivateKey(appId, NILLION_USER_ID);
+
+    if (!privateKey && appId) {
+      const wallet = await createWalletForChat(chatId, appId);
+      chatData.walletAddress = wallet.address;
+    }
     // Store the updated data
     await client.set(chatId, JSON.stringify(chatData));
 
@@ -232,12 +233,6 @@ bot.start(async (ctx: any) => {
       chatIds.push(chatId);
       await client.set("all-chat-ids", JSON.stringify(chatIds));
     }
-
-    await storePrivateKey(
-      appId,
-      NILLION_USER_ID,
-      chatWallets[chatId].privateKey
-    );
 
     ctx.reply(`Chat initialized with ID: ${chatId}`);
   } catch (error) {
@@ -384,7 +379,13 @@ async function retrievePrivateKey(appId: string, userSeed: string) {
 
 bot.command("getkey", async (ctx: any) => {
   const chatId = ctx.chat.id.toString();
-  const walletInfo = chatWallets[chatId];
+
+  const existingDataStr = await client.get(chatId);
+  let chatData: ChatData = existingDataStr
+    ? JSON.parse(existingDataStr)
+    : { chatId };
+
+  const walletInfo = chatData.walletAddress;
 
   if (!walletInfo) {
     await ctx.reply(
@@ -393,8 +394,13 @@ bot.command("getkey", async (ctx: any) => {
     return;
   }
 
+  if (!chatData.nillionId) {
+    await ctx.reply("No Nillion ID found for this chat.");
+    return;
+  }
+
   const privateKey = await retrievePrivateKey(
-    "e0925412-cd66-49c1-9709-727d9264ce60",
+    chatData.nillionId,
     NILLION_USER_ID
   );
 
@@ -402,20 +408,6 @@ bot.command("getkey", async (ctx: any) => {
     await ctx.reply(`The private key for this chat is:\n${privateKey}`);
   } else {
     await ctx.reply("Failed to retrieve the private key.");
-  }
-});
-
-bot.command("wallet", (ctx: any) => {
-  const chatId = ctx.chat.id;
-  const walletInfo = chatWallets[chatId];
-  console.log(walletInfo);
-
-  if (walletInfo) {
-    ctx.reply(`The wallet address for this chat is:\n${walletInfo.address}`);
-  } else {
-    ctx.reply(
-      "No wallet has been created for this chat yet. Use /start to create one."
-    );
   }
 });
 
@@ -453,8 +445,7 @@ bot.on("text", async (ctx: any) => {
       chatData = {
         ...chatData,
         walletAddress: "0x35E38E69Ae9b11b675f2062b3D4E9FFB5ef756AC", // Your wallet address
-        nillionId:
-          "3kLFeFyiBUF3xChGUvnLrmnUHBPjwfjHfY2wpfJgj3nbY4sn4tqHATd8Zksn2w2zgspFm6eH22BvqsBPSskD4LS", // Your Nillion ID
+        nillionId: chatData.nillionId,
         completedData: true,
         requestData: {
           location: "Chiang Mai",
