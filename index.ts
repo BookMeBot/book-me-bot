@@ -9,6 +9,7 @@ import { ethers } from "ethers";
 import axios from "axios";
 import { createClient } from "redis";
 import { Telegraf } from "telegraf";
+import express from "express";
 
 dotenv.config();
 
@@ -590,14 +591,31 @@ function handleFundingComplete(chatId: any) {
   console.log(`Funding complete message sent to chat ${chatId}`);
 }
 
+// Add health check endpoint
+const app = express();
+const PORT = process.env.PORT || 3000;
+
+app.get("/", (req, res) => {
+  res.status(200).send("OK");
+});
+
 // Wrap initialization in async function
 async function initBot() {
-  await client.connect();
+  try {
+    await client.connect();
 
-  // Start the bot
-  bot.launch().then(() => {
+    // Start the bot
+    await bot.launch();
     console.log("Bot is running");
-  });
+
+    // Start express server
+    app.listen(PORT, () => {
+      console.log(`Health check server running on port ${PORT}`);
+    });
+  } catch (error) {
+    console.error("Failed to initialize:", error);
+    process.exit(1);
+  }
 }
 
 // Call the init function
