@@ -580,7 +580,7 @@ function handleFundingComplete(chatId: any) {
 
 // Simplified health check endpoint
 const app = express();
-const PORT = process.env.PORT || 3000;
+const PORT = process.env.PORT || 3005;
 
 app.get("/", (_req: Request, res: Response) => {
   res.sendStatus(200);
@@ -610,7 +610,7 @@ async function initBot() {
 }
 
 // Call the init function
-initBot().catch(console.error);
+// initBot().catch(console.error);
 
 // shutdown
 process.once("SIGINT", () => bot.stop("SIGINT"));
