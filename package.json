@@ -6,8 +6,6 @@
   "type": "commonjs",
   "scripts": {
     "start": "ts-node --transpile-only index.ts",
-    "startcoin": "ts-node --transpile-only coinbase.ts",
-    "startcoin2": "ts-node --transpile-only coinbase2.ts",
     "build": "tsc",
     "dev": "ts-node --transpile-only index.ts"
   },
