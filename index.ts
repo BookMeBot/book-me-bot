@@ -197,6 +197,7 @@ bot.command("sendhistory", async (ctx: any) => {
 export async function registerBasename(
   agentName: string,
   addressId: string,
+  privateKey: string,
   ctx: any
 ) {
   const chatId = ctx.chat?.id.toString();
@@ -212,7 +213,6 @@ export async function registerBasename(
   if (!NILLION_USER_ID || !appId) {
     throw new Error("Nillion ID is required for basename");
   }
-  const privateKey = await retrievePrivateKey(appId, NILLION_USER_ID);
 
   try {
     const provider = new ethers.JsonRpcProvider("https://sepolia.base.org");
@@ -268,7 +268,7 @@ async function createWalletForChat(chatId: string, appId: string, ctx: any) {
   console.log(`Generated Agent Name: ${agentName}`);
 
   // Register the Basename for the new wallet
-  await registerBasename(agentName, wallet.address, ctx);
+  await registerBasename(agentName, wallet.address, wallet.privateKey, ctx);
 
   // Return the wallet information
   return {
