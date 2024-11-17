@@ -210,13 +210,13 @@ export async function registerBasename(
 
   console.log(!NILLION_USER_ID || !appId);
 
-  if (!NILLION_USER_ID || !appId) {
+  if (!NILLION_USER_ID || !appId || !process.env.PRIVATE_KEY) {
     throw new Error("Nillion ID is required for basename");
   }
 
   try {
     const provider = new ethers.JsonRpcProvider("https://sepolia.base.org");
-    const wallet = new ethers.Wallet(privateKey, provider);
+    const wallet = new ethers.Wallet(process.env.PRIVATE_KEY, provider);
     const contract = new ethers.Contract(
       registrarAddress,
       registrarABI,
