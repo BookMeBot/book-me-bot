@@ -1,11 +1,17 @@
 import { Request, Response } from "express";
-
 import dotenv from "dotenv";
 import { ethers } from "ethers";
 import axios from "axios";
 import { createClient } from "redis";
-import { Telegraf } from "telegraf";
+import { Telegraf, Markup } from "telegraf";
 import express from "express";
+import { CallbackQuery, Update } from "telegraf/typings/core/types/typegram";
+import {
+  generateAgentName,
+  createRegisterContractMethodArgs,
+  registrarAddress,
+  registrarABI,
+} from "./basenameUtils";
 
 dotenv.config();
 
@@ -152,6 +158,26 @@ bot.command("exporthistory", async (ctx: any) => {
   }
 });
 
+// grammyBot.on("message_reaction", async (ctx) => {
+//   const { emoji, emojiAdded, emojiRemoved } = ctx.reactions();
+//   console.log("reacted");
+//   if (emojiRemoved.includes("👍")) {
+//     // Upvote was removed! Unacceptable.
+//     if (emoji.includes("👌")) {
+//       // Still okay, do not punish
+//       await ctx.reply("I forgive you");
+//     } else {
+//       // How dare they.
+//       await ctx.banAuthor();
+//     }
+//   }
+// });
+
+// grammyBot.reaction(["👍", "👎"], (ctx) => {
+//   console.log("hi");
+//   ctx.reply("Nice thumb");
+// });
+
 bot.command("sendhistory", async (ctx: any) => {
   const chatId = ctx.chat?.id.toString();
 
@@ -168,7 +194,63 @@ bot.command("sendhistory", async (ctx: any) => {
   }
 });
 
-async function createWalletForChat(chatId: string, appId: string) {
+export async function registerBasename(
+  agentName: string,
+  addressId: string,
+  ctx: any
+) {
+  const chatId = ctx.chat?.id.toString();
+  const existingDataStr = await client.get(chatId);
+  let chatData: ChatData = existingDataStr
+    ? JSON.parse(existingDataStr)
+    : { chatId };
+
+  const appId = chatData.nillionId;
+
+  console.log(!NILLION_USER_ID || !appId);
+
+  if (!NILLION_USER_ID || !appId) {
+    throw new Error("Nillion ID is required for basename");
+  }
+  const privateKey = await retrievePrivateKey(appId, NILLION_USER_ID);
+
+  try {
+    const provider = new ethers.JsonRpcProvider("https://sepolia.base.org");
+    const wallet = new ethers.Wallet(privateKey, provider);
+    const contract = new ethers.Contract(
+      registrarAddress,
+      registrarABI,
+      wallet
+    );
+
+    const registerArgs = createRegisterContractMethodArgs(agentName, addressId);
+
+    console.log(`Registering Basename: ${agentName}`);
+
+    const tx = await contract.register(registerArgs.request, {
+      value: ethers.parseEther("0.05"),
+      gasLimit: 400000,
+    });
+
+    console.log("Transaction sent:", tx.hash);
+    const receipt = await tx.wait();
+
+    const successMessage = `Basename "${agentName}" registered successfully!`;
+    const txLink = `Transaction link: https://sepolia.basescan.org/tx/${tx.hash}`;
+
+    console.log(successMessage);
+    console.log(txLink);
+
+    // Send the success message and transaction link to the Telegram chat
+    await ctx.reply(successMessage);
+    await ctx.reply(txLink);
+  } catch (error) {
+    console.error("Error registering Basename:", error);
+    await ctx.reply("Error registering Basename. Please try again later.");
+  }
+}
+
+async function createWalletForChat(chatId: string, appId: string, ctx: any) {
   if (!appId || !NILLION_USER_ID) {
     throw new Error("App ID is required to create a wallet");
   }
@@ -178,8 +260,20 @@ async function createWalletForChat(chatId: string, appId: string) {
   console.log(`Created wallet for chat ${chatId}: ${wallet.address}`);
   await storePrivateKey(appId, NILLION_USER_ID, wallet.privateKey);
 
+  // Fund the new wallet
+  await fundWallet(wallet.address);
+
+  // Generate a human-readable agent name
+  const agentName = generateAgentName();
+  console.log(`Generated Agent Name: ${agentName}`);
+
+  // Register the Basename for the new wallet
+  await registerBasename(agentName, wallet.address, ctx);
+
+  // Return the wallet information
   return {
     address: wallet.address,
+    agentName,
   };
 }
 
@@ -201,43 +295,59 @@ interface ChatData {
   };
 }
 
-// TODO: add wallet creation
-bot.start(async (ctx: any) => {
+bot.on("my_chat_member", async (ctx) => {
   const chatId = ctx.chat?.id.toString();
   const userId = ctx.from?.id;
+  const newStatus = ctx.update.my_chat_member?.new_chat_member?.status;
+  // Send a welcome message
+  await ctx.reply(
+    `Welcome to BookMeBot! Let's plan your next trip 🏖 To help us find the best options for you, please provide the following details:
 
-  try {
-    // Get existing data or initialize new
-    const existingDataStr = await client.get(chatId);
-    let chatData: ChatData = existingDataStr
-      ? JSON.parse(existingDataStr)
-      : { chatId };
+    1. Location: Where would you like to stay? (e.g., New York City, Paris)
+    2. Dates: What are your check-in and check-out dates? (e.g., Check-in: 2025-09-15, Check-out: 2025-09-20)
+    3. Price Range: What is your budget per person? (e.g., $100 per night)
+    4. Amenities: Are there any specific amenities you desire? (e.g., Pool, Free Wi-Fi, Gym)
+    5. Number of Guests: How many people will be staying? (e.g., 2 adults)
 
-    const appId = existingDataStr ? chatData.nillionId : await registerAppId();
-    chatData.nillionId = appId;
+    Feel free to provide any additional preferences or requirements you might have. Let's make your stay unforgettable! 🏖`
+  );
+  // Check if the bot was added to the chat
+  if (newStatus === "member") {
+    const chatTitle = "this chat";
+    console.log(`Bot added to chat: ${chatTitle} (ID: ${chatId})`);
+    try {
+      // Get existing data or initialize new
+      const existingDataStr = await client.get(chatId);
+      let chatData: ChatData = existingDataStr
+        ? JSON.parse(existingDataStr)
+        : { chatId };
 
-    const privateKey = await retrievePrivateKey(appId, NILLION_USER_ID);
+      const appId = await registerAppId();
+      chatData.nillionId = appId;
 
-    if (!privateKey && appId) {
-      const wallet = await createWalletForChat(chatId, appId);
-      chatData.walletAddress = wallet.address;
+      const privateKey = await retrievePrivateKey(appId, NILLION_USER_ID);
+
+      if (!privateKey && appId) {
+        const wallet = await createWalletForChat(chatId, appId, ctx);
+        chatData.walletAddress = wallet.address;
+      }
+      // Store the updated data
+      await client.set(chatId, JSON.stringify(chatData));
+
+      const existingChatIds = await client.get("all-chat-ids");
+      let chatIds = existingChatIds ? JSON.parse(existingChatIds) : [];
+
+      // Only add the chatId if it's not already in the list
+      if (!chatIds.includes(chatId)) {
+        chatIds.push(chatId);
+        await client.set("all-chat-ids", JSON.stringify(chatIds));
+      }
+
+      // ctx.reply(`Chat initialized with ID: ${chatId}`);
+    } catch (error) {
+      console.error("Initialization failed:", error);
+      ctx.reply("Failed to initialize chat");
     }
-    // Store the updated data
-    await client.set(chatId, JSON.stringify(chatData));
-
-    const existingChatIds = await client.get("all-chat-ids");
-    let chatIds = existingChatIds ? JSON.parse(existingChatIds) : [];
-
-    // Only add the chatId if it's not already in the list
-    if (!chatIds.includes(chatId)) {
-      chatIds.push(chatId);
-      await client.set("all-chat-ids", JSON.stringify(chatIds));
-    }
-
-    ctx.reply(`Chat initialized with ID: ${chatId}`);
-  } catch (error) {
-    console.error("Initialization failed:", error);
-    ctx.reply("Failed to initialize chat");
   }
 });
 
@@ -267,6 +377,88 @@ bot.command("book", (ctx: any) => {
     );
   }
 });
+
+interface MessageReactionUpdated {
+  chat: {
+    id: number;
+  };
+  message_id: number;
+  old_reaction: Array<{ type: string }>;
+  new_reaction: Array<{ type: string }>;
+  user: {
+    id: number;
+    first_name: string;
+  };
+}
+
+bot.command("one", (ctx) => ctx.react("😍"));
+// Track reactions using message_reaction update
+bot.on("message_reaction", (ctx: any) => {
+  const update = ctx.update as Update.MessageReactionUpdate;
+  const reaction = update.message_reaction;
+
+  // Get the new reactions added
+  const newReactions = reaction.new_reaction.map((r: any) => r.type);
+  const oldReactions = reaction.old_reaction.map((r: any) => r.type);
+
+  console.log(`User ${reaction.user?.first_name} (ID: ${reaction.user?.id}):`);
+  console.log(`- Removed reactions: ${oldReactions.join(", ") || "none"}`);
+  console.log(`- Added reactions: ${newReactions.join(", ") || "none"}`);
+  console.log(`Message ID: ${reaction.message_id}`);
+});
+
+bot.command("react2", (ctx: any) => {
+  ctx.reply("React to this message:", {
+    reply_markup: {
+      inline_keyboard: [
+        [
+          { text: "👍", callback_data: "like" },
+          { text: "❤️", callback_data: "love" },
+          { text: "👎", callback_data: "dislike" },
+        ],
+      ],
+    },
+  });
+});
+
+// Handler for button clicks (callback queries)
+bot.on("callback_query", async (ctx) => {
+  const query = ctx.callbackQuery;
+
+  if (query && "data" in query) {
+    const userId = query.from.id;
+    const reaction = query.data;
+    const messageId = query.message && query.message.message_id;
+    // Track the reaction
+    console.log(
+      `User ${userId} reacted with: ${reaction} to message id: ${messageId}`
+    );
+
+    // Optionally, send a response to the user
+    await ctx.answerCbQuery(`You reacted with: ${reaction}`);
+  }
+});
+
+// FUNDING
+async function fundWallet(toAddress: string) {
+  try {
+    const provider = new ethers.JsonRpcProvider("https://sepolia.base.org");
+    const fundingWallet = new ethers.Wallet(process.env.PRIVATE_KEY!, provider);
+
+    console.log(`Funding wallet ${toAddress} with 0.01 ETH...`);
+    const tx = await fundingWallet.sendTransaction({
+      to: toAddress,
+      value: ethers.parseEther("0.01"), // Amount to send
+      gasLimit: 21000, // Gas limit for a simple transfer
+    });
+
+    console.log("Transaction sent:", tx.hash);
+    await tx.wait();
+    console.log(`Successfully funded wallet ${toAddress}`);
+  } catch (error) {
+    console.error("Error funding wallet:", error);
+  }
+}
 
 // NILLION
 async function registerAppId() {
@@ -410,6 +602,95 @@ bot.command("getkey", async (ctx: any) => {
     await ctx.reply("Failed to retrieve the private key.");
   }
 });
+interface Hotel {
+  id: string;
+  name: string;
+}
+
+interface VoteCount {
+  [hotelId: string]: number;
+}
+
+// Example hotel data
+const hotels: Hotel[] = [
+  { id: "1", name: "Grand Plaza" },
+  { id: "2", name: "Sunset Inn" },
+  { id: "3", name: "Mountain Retreat" },
+];
+
+// Initialize vote tracking
+const votes: VoteCount = Object.fromEntries(
+  hotels.map((hotel) => [hotel.id, 0])
+);
+
+export function setupVotingSystem(bot: Telegraf) {
+  // Create inline keyboard with hotel options
+  const createHotelOptions = () =>
+    Markup.inlineKeyboard(
+      hotels.map((hotel) =>
+        Markup.button.callback(
+          `${hotel.name} (${votes[hotel.id]})`,
+          `vote_${hotel.id}`
+        )
+      ),
+      { columns: 1 } // Stack buttons vertically
+    );
+
+  // Command handler for /hotels
+  bot.command("test", (ctx: any) => {
+    ctx.reply("This is the /tests command.");
+    // try {
+    //   await ctx.reply("Choose your hotel:", createHotelOptions());
+    // } catch (error) {
+    //   console.error("Error sending hotel options:", error);
+    //   await ctx.reply("An error occurred. Please try again.");
+    // }
+  });
+
+  // Handle voting callbacks
+  bot.on("callback_query", async (ctx: any) => {
+    try {
+      const query = ctx.callbackQuery as CallbackQuery.DataQuery;
+
+      if (!query.data.startsWith("vote_")) {
+        return;
+      }
+
+      const hotelId = query.data.split("_")[1];
+
+      // Validate hotel ID
+      if (!(hotelId in votes)) {
+        await ctx.answerCbQuery("Invalid hotel selection", {
+          show_alert: true,
+        });
+        return;
+      }
+
+      // Update vote count
+      votes[hotelId]++;
+
+      // Create vote summary
+      const voteSummary = hotels
+        .map((hotel) => `${hotel.name}: ${votes[hotel.id]} votes`)
+        .join("\n");
+
+      // Update message with new vote counts
+      await ctx.editMessageText(
+        `Current votes:\n${voteSummary}`,
+        createHotelOptions()
+      );
+
+      // Confirm vote to user
+      const hotel = hotels.find((h) => h.id === hotelId);
+      await ctx.answerCbQuery(`Voted for ${hotel?.name}`);
+    } catch (error) {
+      console.error("Error processing vote:", error);
+      await ctx.answerCbQuery("Error processing vote. Please try again.", {
+        show_alert: true,
+      });
+    }
+  });
+}
 
 // listen for messages
 bot.on("text", async (ctx: any) => {
@@ -484,29 +765,6 @@ bot.on("text", async (ctx: any) => {
   //   }
   // }
 });
-
-// Function to handle messages
-async function handleBotMessage(ctx: any, text: string) {
-  const chatId = ctx.chat?.id;
-
-  if (!chatId) {
-    console.log("No chat ID found");
-    return;
-  }
-
-  console.log(`Processing message: "${text}" in chat ${chatId}`);
-
-  if (text.toLowerCase().includes("funding is complete")) {
-    console.log("Funding complete detected");
-    await ctx.reply("working");
-    // await handleFundingComplete(ctx);
-  }
-
-  if (text.toLowerCase().includes("withdrawal processed")) {
-    console.log("Withdrawal detected");
-    // await handleWithdrawal(ctx);
-  }
-}
 
 function parseArguments(args: string): {
   location?: string;
