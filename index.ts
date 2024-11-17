@@ -778,9 +778,9 @@ bot.on("text", async (ctx: any) => {
         completedData: true,
         requestData: {
           location: "Chiang Mai",
-          startDate: 0,
-          endDate: 0,
-          numberOfGuests: 4,
+          startDate: 1731776400000,
+          endDate: 1732035600000,
+          numberOfGuests: 2,
           numberOfRooms: 2,
           features: ["Wi-Fi", "swimming pool"],
           budgetPerPerson: 0.1,
@@ -792,7 +792,7 @@ bot.on("text", async (ctx: any) => {
       await client.set(chatIdString, JSON.stringify(chatData));
 
       await ctx.reply(
-        `Sounds like a fun trip! Please visit https://book-me-app-tau.vercel.app/?chatId=${chatId.toString()} to fund your AI travel account.`
+        `Sounds like a fun trip! Please visit http://localhost:3000/?chatId=${chatId.toString()} to fund your AI travel account.`
       );
     } catch (error) {
       console.error("Redis operation failed:", error);
