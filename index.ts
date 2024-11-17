@@ -692,6 +692,50 @@ export function setupVotingSystem(bot: Telegraf) {
   });
 }
 
+async function sendDataToSearchAgent(chatId: string, text: string) {
+  const agentApiUrl = "http://127.0.0.1:8000/chat";
+  const maxRetries = 3;
+
+  for (let attempt = 1; attempt <= maxRetries; attempt++) {
+    try {
+      const response = await axios.post(
+        agentApiUrl,
+        {
+          chatId,
+          messages: [
+            {
+              text: `Based on this text, please find me the booking data: ${text}`,
+            },
+          ],
+        },
+        {
+          timeout: 5000, // 5 second timeout
+          headers: {
+            "Content-Type": "application/json",
+          },
+        }
+      );
+
+      console.log("Search agent response:", response.data);
+      return response.data;
+    } catch (error) {
+      console.error(`Attempt ${attempt} failed:`, error);
+
+      if (attempt === maxRetries) {
+        // If this was the last attempt, handle the error gracefully
+        console.error("All attempts to reach search agent failed");
+        return {
+          completedData: false,
+          error: "Search service unavailable",
+        };
+      }
+
+      // Wait before retrying (exponential backoff)
+      await new Promise((resolve) => setTimeout(resolve, attempt * 1000));
+    }
+  }
+}
+
 // listen for messages
 bot.on("text", async (ctx: any) => {
   const chatId = ctx.chat.id;
@@ -700,18 +744,22 @@ bot.on("text", async (ctx: any) => {
   const isFromBot = ctx.from.is_bot;
 
   console.log(isFromBot);
-
   console.log(messageText);
 
-  if (messageText === "funding is complete.") {
-    ctx.reply(`funding complete for chat ${chatId}`);
-  }
-
   //send data to agent backend
-  //if response has completeData = true then store the result data in redis
-  // await client.set('key', 'value');
+  // const dataFromAgent = await sendDataToSearchAgent(chatId, messageText);
+  // const completedData = dataFromAgent.completedData;
 
-  if (messageText === "redis test") {
+  //if response has completeData = true then store the result data in redis
+  // if (completedData) {
+  //    console.log("completedData", completedData);
+  //    await client.set('key', 'value');
+  // }
+
+  if (
+    messageText ===
+    "I'd like to book Nov 17, 2024 to Nov 20, 2024 in Chiang Mai, Thailand. My budget is $20 per night per person, there are a total of 2 people."
+  ) {
     try {
       // First, check if we have existing data
       const chatIdString = chatId?.toString();
@@ -725,7 +773,7 @@ bot.on("text", async (ctx: any) => {
       // Update with new data
       chatData = {
         ...chatData,
-        walletAddress: "0x35E38E69Ae9b11b675f2062b3D4E9FFB5ef756AC", // Your wallet address
+        walletAddress: chatData.walletAddress,
         nillionId: chatData.nillionId,
         completedData: true,
         requestData: {
@@ -742,28 +790,15 @@ bot.on("text", async (ctx: any) => {
 
       // Store the merged data
       await client.set(chatIdString, JSON.stringify(chatData));
+
+      await ctx.reply(
+        `Sounds like a fun trip! Please visit https://book-me-app-tau.vercel.app/?chatId=${chatId.toString()} to fund your AI travel account.`
+      );
     } catch (error) {
       console.error("Redis operation failed:", error);
       ctx.reply("Failed to store/retrieve data");
     }
   }
-
-  // if (messageText === "✅") {
-  //   if (!agreedUsers.has(userId)) {
-  //     agreedUsers.add(userId);
-  //     ctx.reply(`User ${ctx.from.first_name} has agreed to the trip!`);
-
-  //     // Check if all users have agreed
-  //     if (agreedUsers.size >= totalMembers) {
-  //       ctx.reply(
-  //         "All members have agreed to the trip! 🎉 Booking will proceed now."
-  //       );
-  //       // add booking logic
-  //     }
-  //   } else {
-  //     ctx.reply("You have already responded with ✅.");
-  //   }
-  // }
 });
 
 function parseArguments(args: string): {
@@ -803,29 +838,6 @@ function parseArguments(args: string): {
   return argsObj;
 }
 
-// function funding() {
-//   const chatId = ctx.chat.id;
-//   const userId = ctx.from.id;
-//   const messageText = ctx.message?.text;
-
-//   if (messageText === "✅") {
-//     if (!agreedUsers.has(userId)) {
-//       agreedUsers.add(userId);
-//       ctx.reply(`User ${ctx.from.first_name} has agreed to the trip!`);
-
-//       // Check if all users have agreed
-//       if (agreedUsers.size >= totalMembers) {
-//         ctx.reply(
-//           "All members have agreed to the trip! 🎉 Booking will proceed now."
-//         );
-//         // add booking logic
-//       }
-//     } else {
-//       ctx.reply("You have already responded with ✅.");
-//     }
-//   }
-// }
-
 // start bot
 // Function to handle "funding is complete."
 function handleFundingComplete(chatId: any) {
@@ -838,7 +850,7 @@ function handleFundingComplete(chatId: any) {
 
 // Simplified health check endpoint
 const app = express();
-const PORT = process.env.PORT || 3005;
+const PORT = process.env.PORT || 3009;
 
 app.get("/", (_req: Request, res: Response) => {
   res.sendStatus(200);
@@ -868,7 +880,7 @@ async function initBot() {
 }
 
 // Call the init function
-// initBot().catch(console.error);
+initBot().catch(console.error);
 
 // shutdown
 process.once("SIGINT", () => bot.stop("SIGINT"));
