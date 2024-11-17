@@ -880,7 +880,7 @@ async function initBot() {
 }
 
 // Call the init function
-initBot().catch(console.error);
+// initBot().catch(console.error);
 
 // shutdown
 process.once("SIGINT", () => bot.stop("SIGINT"));
