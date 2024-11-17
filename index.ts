@@ -780,8 +780,8 @@ bot.on("text", async (ctx: any) => {
           location: "Chiang Mai",
           startDate: 1731776400000,
           endDate: 1732035600000,
-          numberOfGuests: 2,
-          numberOfRooms: 2,
+          numberOfGuests: 1,
+          numberOfRooms: 1,
           features: ["Wi-Fi", "swimming pool"],
           budgetPerPerson: 0.1,
           currency: "USD",
@@ -880,7 +880,7 @@ async function initBot() {
 }
 
 // Call the init function
-// initBot().catch(console.error);
+initBot().catch(console.error);
 
 // shutdown
 process.once("SIGINT", () => bot.stop("SIGINT"));
